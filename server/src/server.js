@@ -17,6 +17,22 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Ensure database connection is established before processing API requests (Essential for Serverless / Vercel)
+app.use(async (req, res, next) => {
+  if (req.originalUrl.startsWith('/api') && req.originalUrl !== '/api/health') {
+    try {
+      await connectDB();
+    } catch (err) {
+      console.error('[Database Middleware Connection Error]:', err.message);
+      return res.status(500).json({
+        success: false,
+        message: `Database connection error: ${err.message}. Please check MONGODB_URI and verify MongoDB Atlas Network Access whitelist (0.0.0.0/0).`
+      });
+    }
+  }
+  next();
+});
+
 // Health Check
 app.get('/api/health', (req, res) => {
   res.json({
@@ -57,15 +73,6 @@ const startServer = async () => {
   try {
     await connectDB();
 
-    // Auto-seed if database is currently empty
-    const User = require('./models/User');
-    const userCount = await User.countDocuments();
-    if (userCount === 0) {
-      console.log('[Server] Database is empty. Running automatic seed...');
-      const seedAll = require('./seed/seedData');
-      await seedAll();
-    }
-
     app.listen(PORT, () => {
       console.log(`===============================================`);
       console.log(`🚀 SkillBridge Server running on port ${PORT}`);
@@ -80,6 +87,9 @@ const startServer = async () => {
 
 if (!process.env.VERCEL) {
   startServer();
+} else {
+  // Pre-warm database connection in serverless environment
+  connectDB().catch(err => console.warn('[Vercel DB Init]', err.message));
 }
 
 module.exports = app;
