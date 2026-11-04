@@ -3,13 +3,57 @@ const mongoose = require('mongoose');
 let mongoMemoryServer = null;
 let isSeeded = false;
 
+// Auto-sanitizes MongoDB URI: strips accidental <brackets> and URL-encodes special characters in password
+const sanitizeMongoUri = (rawUri) => {
+  if (!rawUri || !rawUri.includes('://')) return rawUri;
+  try {
+    const schemeMatch = rawUri.match(/^([a-z0-9+]+:\/\/)(.*)$/i);
+    if (!schemeMatch) return rawUri;
+    const scheme = schemeMatch[1];
+    const afterScheme = schemeMatch[2];
+
+    const lastAtIndex = afterScheme.lastIndexOf('@');
+    if (lastAtIndex === -1) return rawUri;
+
+    const creds = afterScheme.substring(0, lastAtIndex);
+    const hostAndRest = afterScheme.substring(lastAtIndex + 1);
+
+    const colonIndex = creds.indexOf(':');
+    if (colonIndex === -1) return rawUri;
+
+    let user = creds.substring(0, colonIndex);
+    let pass = creds.substring(colonIndex + 1);
+
+    if (pass.startsWith('<') && pass.endsWith('>')) {
+      pass = pass.slice(1, -1);
+    }
+    if (user.startsWith('<') && user.endsWith('>')) {
+      user = user.slice(1, -1);
+    }
+
+    let decodedPass;
+    try {
+      decodedPass = decodeURIComponent(pass);
+    } catch (e) {
+      decodedPass = pass;
+    }
+    const encodedPass = encodeURIComponent(decodedPass);
+
+    return `${scheme}${user}:${encodedPass}@${hostAndRest}`;
+  } catch (err) {
+    console.warn('[Database] URI sanitization fallback:', err.message);
+    return rawUri;
+  }
+};
+
 const connectDB = async () => {
   // If already connected, reuse connection (essential for serverless environments like Vercel)
   if (mongoose.connection.readyState >= 1) {
     return mongoose.connection;
   }
 
-  const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/skillbridge';
+  const rawUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/skillbridge';
+  const uri = sanitizeMongoUri(rawUri);
   const isCloudUri = uri.includes('mongodb+srv://') || process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
 
   try {
