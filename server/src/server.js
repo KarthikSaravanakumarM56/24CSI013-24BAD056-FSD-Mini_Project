@@ -3,8 +3,9 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
-const { connectDB } = require('./config/db');
+const { connectDB, sanitizeMongoUri } = require('./config/db');
 const errorHandler = require('./middleware/errorHandler');
+const mongoose = require('mongoose');
 
 // Load environment variables
 dotenv.config();
@@ -40,6 +41,29 @@ app.get('/api/health', (req, res) => {
     service: 'SkillBridge API',
     timestamp: new Date().toISOString()
   });
+});
+
+// Diagnostic DB Status Check
+app.get('/api/debug-db', async (req, res) => {
+  try {
+    const rawUri = process.env.MONGODB_URI || 'NOT_SET';
+    const sanitized = sanitizeMongoUri(rawUri);
+    const masked = sanitized.replace(/\/\/.*@/, '//<credentials>@');
+    await connectDB();
+    const state = mongoose.connection.readyState;
+    res.json({
+      connected: state === 1,
+      readyState: state,
+      maskedUri: masked,
+      hasSrv: rawUri.includes('mongodb+srv://')
+    });
+  } catch (err) {
+    res.status(500).json({
+      connected: false,
+      error: err.message,
+      name: err.name
+    });
+  }
 });
 
 // Mount Routes

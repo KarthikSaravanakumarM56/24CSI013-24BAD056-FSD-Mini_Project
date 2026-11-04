@@ -48,7 +48,7 @@ const sanitizeMongoUri = (rawUri) => {
 
 const connectDB = async () => {
   // If already connected, reuse connection (essential for serverless environments like Vercel)
-  if (mongoose.connection.readyState >= 1) {
+  if (mongoose.connection.readyState === 1) {
     return mongoose.connection;
   }
 
@@ -59,7 +59,8 @@ const connectDB = async () => {
   try {
     // Connect with serverSelectionTimeoutMS
     await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: isCloudUri ? 8000 : 3000
+      serverSelectionTimeoutMS: isCloudUri ? 8000 : 3000,
+      bufferCommands: false
     });
     console.log(`[Database] MongoDB Connected successfully`);
 
@@ -116,4 +117,4 @@ const disconnectDB = async () => {
   }
 };
 
-module.exports = { connectDB, disconnectDB };
+module.exports = { connectDB, disconnectDB, sanitizeMongoUri };
