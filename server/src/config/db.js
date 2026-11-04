@@ -1,5 +1,10 @@
 const mongoose = require('mongoose');
 
+let cached = global.mongoose;
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
+
 let mongoMemoryServer = null;
 let isSeeded = false;
 
@@ -47,71 +52,82 @@ const sanitizeMongoUri = (rawUri) => {
 };
 
 const connectDB = async () => {
-  // If already connected, reuse connection (essential for serverless environments like Vercel)
-  if (mongoose.connection.readyState === 1) {
-    return mongoose.connection;
+  // If already connected and ready, return existing connection immediately
+  if (cached.conn && mongoose.connection.readyState === 1) {
+    return cached.conn;
   }
 
-  const rawUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/skillbridge';
-  const uri = sanitizeMongoUri(rawUri);
-  const isCloudUri = uri.includes('mongodb+srv://') || process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
+  // If already connecting, await that same in-flight promise!
+  if (!cached.promise) {
+    const rawUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/skillbridge';
+    const uri = sanitizeMongoUri(rawUri);
+    const isCloudUri = uri.includes('mongodb+srv://') || process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
+
+    const opts = {
+      bufferCommands: true,
+      serverSelectionTimeoutMS: isCloudUri ? 15000 : 3000
+    };
+
+    cached.promise = mongoose.connect(uri, opts).then(async (m) => {
+      console.log('[Database] MongoDB Connected successfully');
+
+      // Auto-seed if database is currently empty
+      if (!isSeeded) {
+        try {
+          const User = require('../models/User');
+          const userCount = await User.countDocuments();
+          if (userCount === 0) {
+            console.log('[Server] Database is empty. Running automatic seed...');
+            const seedAll = require('../seed/seedData');
+            await seedAll();
+          }
+          isSeeded = true;
+        } catch (seedErr) {
+          console.warn('[Database] Seeding check warning:', seedErr.message);
+        }
+      }
+
+      return m;
+    }).catch(err => {
+      cached.promise = null;
+      throw err;
+    });
+  }
 
   try {
-    // Connect with serverSelectionTimeoutMS
-    await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: isCloudUri ? 8000 : 3000,
-      bufferCommands: false
-    });
-    console.log(`[Database] MongoDB Connected successfully`);
-
-    // Auto-seed if database is currently empty
-    if (!isSeeded) {
-      try {
-        const User = require('../models/User');
-        const userCount = await User.countDocuments();
-        if (userCount === 0) {
-          console.log('[Server] Database is empty. Running automatic seed...');
-          const seedAll = require('../seed/seedData');
-          await seedAll();
-        }
-        isSeeded = true;
-      } catch (seedErr) {
-        console.warn('[Database] Seeding check error:', seedErr.message);
-      }
-    }
-
-    return mongoose.connection;
+    cached.conn = await cached.promise;
+    return cached.conn;
   } catch (err) {
-    console.error(`[Database] Connection error:`, err.message);
+    cached.promise = null;
+    console.error('[Database] Connection failed:', err.message);
 
-    // In Cloud/Vercel environments, do not attempt to run MongoDB Memory Server
-    if (isCloudUri || process.env.VERCEL) {
+    // In local development, fall back to in-memory server if not in cloud
+    const isCloud = (process.env.MONGODB_URI || '').includes('mongodb+srv://') || !!process.env.VERCEL;
+    if (isCloud) {
       throw err;
     }
 
-    console.log(`[Database] Initializing MongoDB Memory Server for local development...`);
-    try {
-      const { MongoMemoryServer } = require('mongodb-memory-server');
-      mongoMemoryServer = await MongoMemoryServer.create();
-      const memoryUri = mongoMemoryServer.getUri();
-      await mongoose.connect(memoryUri);
-      console.log(`[Database] Connected to in-memory MongoDB at: ${memoryUri}`);
+    console.log('[Database] Initializing MongoDB Memory Server for local fallback...');
+    const { MongoMemoryServer } = require('mongodb-memory-server');
+    mongoMemoryServer = await MongoMemoryServer.create();
+    const memoryUri = mongoMemoryServer.getUri();
+    await mongoose.connect(memoryUri);
+    console.log(`[Database] Connected to in-memory MongoDB at: ${memoryUri}`);
 
-      if (!isSeeded) {
-        const seedAll = require('../seed/seedData');
-        await seedAll();
-        isSeeded = true;
-      }
-      return mongoose.connection;
-    } catch (memErr) {
-      console.error(`[Database] Critical error starting in-memory MongoDB:`, memErr.message);
-      throw memErr;
+    if (!isSeeded) {
+      const seedAll = require('../seed/seedData');
+      await seedAll();
+      isSeeded = true;
     }
+    cached.conn = mongoose.connection;
+    return cached.conn;
   }
 };
 
 const disconnectDB = async () => {
   await mongoose.disconnect();
+  cached.conn = null;
+  cached.promise = null;
   if (mongoMemoryServer) {
     await mongoMemoryServer.stop();
   }

@@ -111,9 +111,6 @@ const startServer = async () => {
 
 if (!process.env.VERCEL) {
   startServer();
-} else {
-  // Pre-warm database connection in serverless environment
-  connectDB().catch(err => console.warn('[Vercel DB Init]', err.message));
 }
 
 module.exports = app;
