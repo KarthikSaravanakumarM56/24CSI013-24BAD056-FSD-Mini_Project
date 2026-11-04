@@ -1,0 +1,10 @@
+{
+  "name": "skillbridge-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "cd server && npm install && cd ../client && npm install",
+    "seed": "cd server && npm run seed",
+    "start": "node run-all.js"
+  }
+}
