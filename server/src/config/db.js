@@ -3,6 +3,11 @@ const mongoose = require('mongoose');
 let mongoMemoryServer = null;
 
 const connectDB = async () => {
+  // If already connected, reuse connection (essential for serverless environments like Vercel)
+  if (mongoose.connection.readyState >= 1) {
+    return mongoose.connection;
+  }
+
   const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/skillbridge';
   
   try {

@@ -52,7 +52,7 @@ if (fs.existsSync(clientDistPath)) {
 // Global Error Handler
 app.use(errorHandler);
 
-// Connect DB & Start Server
+// Connect DB & Start Server (Only in standalone/local mode, not in Vercel serverless)
 const startServer = async () => {
   try {
     await connectDB();
@@ -78,6 +78,8 @@ const startServer = async () => {
   }
 };
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
 
 module.exports = app;
