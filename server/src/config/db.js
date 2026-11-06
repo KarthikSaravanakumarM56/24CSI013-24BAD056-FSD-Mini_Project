@@ -8,34 +8,45 @@ if (!cached) {
 let mongoMemoryServer = null;
 let isSeeded = false;
 
-// Auto-sanitizes MongoDB URI: strips accidental <brackets> and URL-encodes special characters in password
+// Auto-sanitizes MongoDB URI: strips accidental quotes/brackets, URL-encodes special characters in password, and validates placeholders
 const sanitizeMongoUri = (rawUri) => {
-  if (!rawUri || !rawUri.includes('://')) return rawUri;
+  if (!rawUri) return rawUri;
+  // Clean whitespace and surrounding double/single quotes
+  let clean = String(rawUri).trim().replace(/^["']|["']$/g, '');
+  if (!clean.includes('://')) return clean;
+
   try {
-    const schemeMatch = rawUri.match(/^([a-z0-9+]+:\/\/)(.*)$/i);
-    if (!schemeMatch) return rawUri;
+    const schemeMatch = clean.match(/^([a-z0-9+]+:\/\/)(.*)$/i);
+    if (!schemeMatch) return clean;
     const scheme = schemeMatch[1];
     const afterScheme = schemeMatch[2];
 
     const lastAtIndex = afterScheme.lastIndexOf('@');
-    if (lastAtIndex === -1) return rawUri;
+    if (lastAtIndex === -1) return clean;
 
     const creds = afterScheme.substring(0, lastAtIndex);
-    const hostAndRest = afterScheme.substring(lastAtIndex + 1);
+    let hostAndRest = afterScheme.substring(lastAtIndex + 1);
 
     const colonIndex = creds.indexOf(':');
-    if (colonIndex === -1) return rawUri;
+    if (colonIndex === -1) return clean;
 
     let user = creds.substring(0, colonIndex);
     let pass = creds.substring(colonIndex + 1);
 
-    if (pass.startsWith('<') && pass.endsWith('>')) {
-      pass = pass.slice(1, -1);
-    }
-    if (user.startsWith('<') && user.endsWith('>')) {
-      user = user.slice(1, -1);
+    // Strip accidental < > brackets from username and password
+    pass = pass.replace(/^<|>$/g, '').trim();
+    user = user.replace(/^<|>$/g, '').trim();
+
+    // Check for common documentation placeholders
+    if (pass === 'password' || pass === 'db_password' || pass === '<db_password>' || pass === '<password>') {
+      throw new Error("MONGODB_URI still contains placeholder '<db_password>'. Please replace it with your actual MongoDB Atlas database user password in Vercel environment variables.");
     }
 
+    if (hostAndRest.toLowerCase().includes('cluster0.xxxxx') || hostAndRest.toLowerCase().includes('xxxxx.mongodb.net')) {
+      throw new Error("MONGODB_URI contains placeholder cluster 'cluster0.xxxxx.mongodb.net'. Please replace it with your actual MongoDB Atlas cluster hostname.");
+    }
+
+    // Safely decode and re-encode to avoid unescaped characters error
     let decodedPass;
     try {
       decodedPass = decodeURIComponent(pass);
@@ -44,10 +55,30 @@ const sanitizeMongoUri = (rawUri) => {
     }
     const encodedPass = encodeURIComponent(decodedPass);
 
-    return `${scheme}${user}:${encodedPass}@${hostAndRest}`;
+    let decodedUser;
+    try {
+      decodedUser = decodeURIComponent(user);
+    } catch (e) {
+      decodedUser = user;
+    }
+    const encodedUser = encodeURIComponent(decodedUser);
+
+    // Auto-inject database name if missing (e.g. mongodb+srv://...@cluster.mongodb.net/?...)
+    if (hostAndRest.includes('.mongodb.net/?')) {
+      hostAndRest = hostAndRest.replace('.mongodb.net/?', '.mongodb.net/skillbridge?');
+    } else if (hostAndRest.endsWith('.mongodb.net/')) {
+      hostAndRest = hostAndRest.replace(/\.mongodb\.net\/$/, '.mongodb.net/skillbridge');
+    } else if (hostAndRest.endsWith('.mongodb.net')) {
+      hostAndRest = `${hostAndRest}/skillbridge`;
+    }
+
+    return `${scheme}${encodedUser}:${encodedPass}@${hostAndRest}`;
   } catch (err) {
+    if (err.message && err.message.includes('MONGODB_URI')) {
+      throw err;
+    }
     console.warn('[Database] URI sanitization fallback:', err.message);
-    return rawUri;
+    return clean;
   }
 };
 

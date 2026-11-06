@@ -15,6 +15,29 @@ const protect = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+
+    // Support offline demo sessions if DB is disconnected
+    if (typeof decoded.id === 'string' && decoded.id.startsWith('demo_')) {
+      req.user = {
+        _id: decoded.id,
+        name: 'Karthik Saravanakumar',
+        email: 'karthik.alumni@gmail.com',
+        role: 'student',
+        domain: 'Full Stack Development',
+        targetRole: 'Full Stack Developer',
+        college: 'Kumaraguru College of Technology',
+        studentStatus: 'Passed Out Graduate (Alumni)',
+        graduationYear: 2026,
+        currentSkills: [
+          { name: 'React', level: 'Intermediate', verified: true },
+          { name: 'Node.js', level: 'Intermediate', verified: true },
+          { name: 'JavaScript', level: 'Advanced', verified: true },
+          { name: 'MongoDB', level: 'Intermediate', verified: true }
+        ]
+      };
+      return next();
+    }
+
     const user = await User.findById(decoded.id).select('-password');
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not found with this token' });

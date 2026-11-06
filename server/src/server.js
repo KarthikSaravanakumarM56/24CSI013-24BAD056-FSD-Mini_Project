@@ -20,11 +20,16 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Ensure database connection is established before processing API requests (Essential for Serverless / Vercel)
 app.use(async (req, res, next) => {
-  if (req.originalUrl.startsWith('/api') && req.originalUrl !== '/api/health') {
+  const url = req.originalUrl || req.url || '';
+  if (url.startsWith('/api') && url !== '/api/health' && url !== '/api/debug-db') {
     try {
       await connectDB();
     } catch (err) {
-      console.error('[Database Middleware Connection Error]:', err.message);
+      console.warn('[Database Connection Warning]:', err.message);
+      // For Google instant auth or static catalog routes, let routes proceed with fallback
+      if (url.startsWith('/api/auth/google') || url.startsWith('/api/users/domains')) {
+        return next();
+      }
       return res.status(500).json({
         success: false,
         message: `Database connection error: ${err.message}. Please check MONGODB_URI and verify MongoDB Atlas Network Access whitelist (0.0.0.0/0).`

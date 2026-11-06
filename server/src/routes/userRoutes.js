@@ -19,9 +19,15 @@ router.get('/domains', (req, res) => {
 // @desc    Get current user profile
 router.get('/profile', protect, async (req, res, next) => {
   try {
+    if (typeof req.user._id === 'string' && req.user._id.startsWith('demo_')) {
+      return res.json({ success: true, user: req.user });
+    }
     const user = await User.findById(req.user._id).select('-password');
-    res.json({ success: true, user });
+    res.json({ success: true, user: user || req.user });
   } catch (err) {
+    if (req.user) {
+      return res.json({ success: true, user: req.user });
+    }
     next(err);
   }
 });
